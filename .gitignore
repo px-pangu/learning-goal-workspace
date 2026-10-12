@@ -1,0 +1,17 @@
+# 运行时生成的中间产物（示例数据载荷、读回的行结构）
+.cache/
+
+# 依赖与编辑器
+node_modules/
+.idea/
+.vscode/
+*.swp
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 日志与临时文件
+*.log
+*.tmp
