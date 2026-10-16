@@ -62,6 +62,7 @@ index.html              交付页面（单文件，含全部 CSS / JS）
 tools/gen_seed.py       生成示例数据载荷（按「今天」相对偏移，演示状态可复现）
 tools/fetch_rows.py     把数据表读回的内容转成页面行结构（带类型）
 tools/render_check.js   渲染回归校验（用页面自身的逻辑跑断言）
+tools/offline_check.js  离线可用性自检（模拟无 SDK 环境启动 + 点击）
 docs/data-schema.md     三张数据表的字段定义
 ```
 
@@ -81,7 +82,12 @@ python3 tools/fetch_rows.py --goals-table <id> --logs-table <id> --notes-table <
 
 # 4) 渲染回归校验
 node tools/render_check.js
+
+# 5) 离线可用性自检（不需要任何数据表，clone 下来即可跑）
+node tools/offline_check.js
 ```
+
+`offline_check.js` 回答的是「clone 下来、还没接任何数据表时，这页面能不能用」。它刻意把环境模拟成**没有 `window.__SMART_PAGE__` 的普通浏览器**，保留页面完整启动段跑真实启动流程，再用桩 DOM 模拟点击，验证离线模式下仍然：不白屏、能新建目标、能打卡、关掉重开数据还在、四个 Tab 能切。当前 **15/15 通过**。
 
 `render_check.js` 的做法值得说明：它**不重写一遍业务逻辑**（那样只是自证），而是把 `index.html` 里的内联脚本抽出来，切掉末尾启动段、把内部函数挂到 `window.__T`，再用桩 DOM / localStorage 驱动 `applyGoals → applyLogs → applyNotes → refreshAll` 这条**真实渲染路径**，最后断言渲染出来的 DOM。断言通过的含义是「表里存的数据在页面上确实呈现为预期状态」。当前示例数据下 **20/20 通过**。
 
