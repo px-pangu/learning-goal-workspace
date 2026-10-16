@@ -111,6 +111,20 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   });
   const builtinConfigured = Object.values(builtin).every(v => v && !/^YOUR_/.test(v));
 
+  /* 「允许出现的表 ID」= 页面内置配置 + 使用者填写的。
+     真正要保证的性质是：任何一次请求都落在这个集合里，
+     即「只读写被配置给它的表」。（单看位数分不出「他人」还是「自己配的」。） */
+  const allowedIds = (extra) => {
+    const s = new Set();
+    Object.values(builtin).forEach(v => { if (v && !/^YOUR_/.test(v)) s.add(v); });
+    (extra || []).forEach(v => v && s.add(v));
+    return s;
+  };
+  const onlyConfigured = (ids, extra) => {
+    const s = allowedIds(extra);
+    return ids.every(v => s.has(v));
+  };
+
   /* === 场景 1：资料库环境 + 页面自带配置状态 === */
   log.push(builtinConfigured
     ? '=== 场景 1：页面已内置配置（跑过 configure.py）==='
@@ -125,7 +139,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     ck('请求打到内置配置的三个 ID',
       Object.values(builtin).every(v => ids1.includes(v)), ids1.join(','));
     ck('不出现占位符', !ids1.some(v => /^YOUR_/.test(v)), ids1.join(','));
-    ck('不出现任何 22 位的他人表 ID', !ids1.some(v => /^[A-Za-z0-9]{22}$/.test(v)), ids1.join(','));
+    ck('请求不落在配置之外的任何表上', onlyConfigured(ids1), ids1.join(','));
   } else {
     ck('一次 SDK 调用都没有（不会拿占位符去请求）', sdk1.calls.length === 0,
       '调用次数 ' + sdk1.calls.length);
@@ -174,8 +188,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
     [MINE.goals, MINE.logs, MINE.notes].every(v => usedIds.includes(v)),
     '实际请求: ' + usedIds.join(','));
   ck('不出现占位符', !usedIds.some(v => /^YOUR_/.test(v)), usedIds.join(','));
-  ck('不出现任何 22 位的他人表 ID',
-    !usedIds.some(v => /^[A-Za-z0-9]{22}$/.test(v)), usedIds.join(','));
+  ck('请求不落在配置之外的任何表上', onlyConfigured(usedIds, Object.values(MINE)), usedIds.join(','));
   ck('绑定状态区显示已绑定的表',
     /MyGoalsTableId0001/.test(env2.dom.document.getElementById('bindStatus').innerHTML));
 
@@ -187,7 +200,7 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
   await wait(80);
   const ids3 = [...new Set(sdk3.calls.map(c => c.id).filter(Boolean))];
   ck('重开后仍读取自己的表', ids3.includes(MINE.logs), ids3.join(','));
-  ck('重开后仍不碰他人表', !ids3.some(v => /^[A-Za-z0-9]{22}$/.test(v)), ids3.join(','));
+  ck('重开后仍只读写配置的表', onlyConfigured(ids3, Object.values(MINE)), ids3.join(','));
 
   console.log(log.join('\n'));
   console.log('\n结果：' + pass + ' 通过 / ' + fail + ' 失败');
