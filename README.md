@@ -43,10 +43,19 @@
 
 页面**不绑定任何特定账号的数据表**：数据表 ID 由使用者自己配置，配谁的就读谁的。
 
-1. 在你自己的 WorkBuddy 资料库里按上表建好三张数据表
+1. 在你自己的 WorkBuddy 资料库里按上表建好三张数据表 —— 可以用脚本一次建齐：
+
+```bash
+python3 tools/init_tables.py --skill-dir <资料库skill目录> --dry-run   # 先看要建什么
+python3 tools/init_tables.py --skill-dir <资料库skill目录>             # 建表并打印三个 ID
+python3 tools/init_tables.py --skill-dir <资料库skill目录> --configure  # 建表并直接写进 index.html
+```
+
 2. 把三张表的 ID 配进页面（两种方式，任选其一，见下）
 3. 把 `index.html` 导入你的资料库空间，导入时绑定这三张表
 4. 打开页面即可
+
+> 资料库目前没有「删除整张表」的接口，所以 `init_tables.py` 建出来的表需要你在资料库里手动删；建议先 `--dry-run`，确认表名与字段后再真建。
 
 ### 方式一：一键配置（推荐）
 
@@ -84,6 +93,7 @@ python3 tools/configure.py --check
 ```
 index.html              交付页面（单文件，含全部 CSS / JS）
 tools/configure.py      一键把三张表 ID 配进页面（--check 可查看当前配置）
+tools/init_tables.py    在自己的资料库里一次建好三张表（--dry-run 可预览）
 tools/gen_seed.py       生成示例数据载荷（按「今天」相对偏移，演示状态可复现）
 tools/reseed.py         一键重置线上示例数据（只删带示例标记的行，你的数据不动）
 tools/fetch_rows.py     把数据表读回的内容转成页面行结构（带类型）
