@@ -11,11 +11,15 @@
 另外刻意放了 2 条补记记录（makeup=true，按真实日期参与连续天数与推算）
 和 2 条未填分钟的记录（14 天堆叠柱状图不硬凑）。
 
-用法：
-  python3 gen_seed.py --goals-table <学习目标表 id> --logs-table <每日打卡记录表 id> [--out-dir .cache]
+代价：相对日期的示例必然随时间过期（隔几天「昨日漏打卡」就不成立）。
+过期后重跑 tools/reseed.py 即可一键重写（只动带示例标记的行）。
 
-输出 <out-dir>/payload_goals.json、<out-dir>/payload_logs.json，
-再喂给资料库 skill 的 database/batch_add_database_records.py 写入：
+用法：
+  python3 gen_seed.py --goals-table <学习目标表 id> --logs-table <每日打卡记录表 id> \
+      [--notes-table <每周复盘表 id>] [--out-dir .cache]
+
+输出 <out-dir>/payload_goals.json、payload_logs.json（给了 --notes-table 时还有
+payload_notes.json），再喂给资料库 skill 的 database/batch_add_database_records.py 写入：
 
   python3 <skill>/database/batch_add_database_records.py --stdin < .cache/payload_goals.json
   python3 <skill>/database/batch_add_database_records.py --stdin < .cache/payload_logs.json
@@ -88,6 +92,25 @@ for gi, (gid, plan) in enumerate([("seed-g1", A_PLAN), ("seed-g2", B_PLAN), ("se
         LOGS.append(dict(goalId=gid, id="lg-%s%02d" % ("abc"[gi], n + 1),
                          off=off, amount=amt, minutes=mins, makeup=mk))
 
+# ---------------- 周复盘：上周 / 上上周各一条 ----------------
+def _monday_of(off):
+    x = T + datetime.timedelta(days=off)
+    return (x - datetime.timedelta(days=x.weekday())).isoformat()
+
+
+NOTES = [
+    dict(week=_monday_of(-7),
+         keep="Python 课连续 6 天没断，每天都能吃下 2 节",
+         issue="周日一整天没碰书，单词也差点断掉",
+         try_="周末先完成一节再出门",
+         plan="如果周末想赖床，就先把电脑放桌上"),
+    dict(week=_monday_of(-14),
+         keep="《人类简史》按计划推进，单词稳定在每天 50 个以上",
+         issue="阅读总拖到睡前，一躺下就刷手机",
+         try_="把阅读挪到午饭后 20 分钟",
+         plan="如果睡前想刷手机，我就先把书读 2 页"),
+]
+
 GOAL_BY_ID = {g["id"]: g for g in GOALS}
 
 
@@ -112,7 +135,12 @@ def build_payloads():
         if l["minutes"] is not None:
             props["分钟"] = {"number": l["minutes"]}
         log_records.append(props)
-    return goal_records, log_records
+
+    note_records = [P(
+        ("周起始日", ("date", n["week"])), ("保持", n["keep"]), ("问题", n["issue"]),
+        ("尝试", n["try_"]), ("下周预案", n["plan"]), ("示例", True),
+    ) for n in NOTES]
+    return goal_records, log_records, note_records
 
 
 # ---------------- 与页面 app.js 等价的计算，用于生成后自检 ----------------
@@ -201,18 +229,24 @@ def self_check():
         else:
             print("      → 今日卡片：%s" % ("今日已打卡" if TODAY in gd else "待打卡"))
 
+    print("  周复盘示例：%s" % "、".join(n["week"] + " 起" for n in NOTES))
+
 
 def main():
     ap = argparse.ArgumentParser(description="生成学习目标管理台的示例数据载荷")
     ap.add_argument("--goals-table", required=True, help="「学习目标」数据表 id")
     ap.add_argument("--logs-table", required=True, help="「每日打卡记录」数据表 id")
+    ap.add_argument("--notes-table", default="", help="「每周复盘」数据表 id（可选）")
     ap.add_argument("--out-dir", default=".cache", help="输出目录（默认 .cache）")
     args = ap.parse_args()
 
-    goal_records, log_records = build_payloads()
+    goal_records, log_records, note_records = build_payloads()
     os.makedirs(args.out_dir, exist_ok=True)
-    for name, db, recs in (("payload_goals.json", args.goals_table, goal_records),
-                           ("payload_logs.json", args.logs_table, log_records)):
+    writes = (("payload_goals.json", args.goals_table, goal_records),
+              ("payload_logs.json", args.logs_table, log_records))
+    if args.notes_table:
+        writes += (("payload_notes.json", args.notes_table, note_records),)
+    for name, db, recs in writes:
         path = os.path.join(args.out_dir, name)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"database_id": db, "records": recs}, f, ensure_ascii=False, indent=1)

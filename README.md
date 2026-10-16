@@ -35,7 +35,7 @@
 |---|---|---|
 | 学习目标 | 目标定义 | 目标名 / 单位 / 总量 / 截止日 / 创建日 / 配色 / 障碍 / 对策 / 示例 / 目标ID |
 | 每日打卡记录 | 每次打卡一条 | 日期 / 目标名 / 打卡量 / 单位 / 分钟 / 补记 / 目标ID / 记录ID |
-| 每周复盘 | 每周一条 | 周起始日 / 保持 / 问题 / 尝试 / 下周预案 |
+| 每周复盘 | 每周一条 | 周起始日 / 保持 / 问题 / 尝试 / 下周预案 / 示例 |
 
 字段类型与取值格式见 [docs/data-schema.md](docs/data-schema.md)。
 
@@ -85,6 +85,7 @@ python3 tools/configure.py --check
 index.html              交付页面（单文件，含全部 CSS / JS）
 tools/configure.py      一键把三张表 ID 配进页面（--check 可查看当前配置）
 tools/gen_seed.py       生成示例数据载荷（按「今天」相对偏移，演示状态可复现）
+tools/reseed.py         一键重置线上示例数据（只删带示例标记的行，你的数据不动）
 tools/fetch_rows.py     把数据表读回的内容转成页面行结构（带类型）
 tools/render_check.js   渲染回归校验（用页面自身的逻辑跑断言）
 tools/offline_check.js  离线可用性自检（模拟无 SDK 环境启动 + 点击）
@@ -98,24 +99,21 @@ SDK 调用统一从 `BINDING` 取值，因此改一处（或页面内填一次�
 ## 开发与自检
 
 ```bash
-# 1) 生成示例数据载荷（含内置自检，会打印每个目标最终呈现的卡片状态）
-python3 tools/gen_seed.py --goals-table <目标表id> --logs-table <记录表id>
+# 1) 一键写示例数据（删旧示例 → 按今天重新生成 → 写回三张表；先 --dry-run 看影响面）
+python3 tools/reseed.py --goals-table <目标表id> --logs-table <记录表id> --notes-table <复盘表id> \
+    --skill-dir <资料库skill目录> --yes
 
-# 2) 写入数据表（资料库 skill 提供的通用脚本）
-python3 <资料库skill>/database/batch_add_database_records.py --stdin < .cache/payload_goals.json
-python3 <资料库skill>/database/batch_add_database_records.py --stdin < .cache/payload_logs.json
-
-# 3) 把表里的数据读回成页面行结构
+# 2) 把表里的数据读回成页面行结构
 python3 tools/fetch_rows.py --goals-table <id> --logs-table <id> --notes-table <id> \
     --skill-dir <资料库skill目录>
 
-# 4) 渲染回归校验
+# 3) 渲染回归校验
 node tools/render_check.js
 
-# 5) 离线可用性自检（不需要任何数据表，clone 下来即可跑）
+# 4) 离线可用性自检（不需要任何数据表，clone 下来即可跑）
 node tools/offline_check.js
 
-# 6) 数据归属安全校验（同样不需要任何数据表）
+# 5) 数据归属安全校验（同样不需要任何数据表）
 node tools/binding_check.js
 ```
 
@@ -129,9 +127,19 @@ node tools/binding_check.js
 
 `render_check.js` 的做法值得说明：它**不重写一遍业务逻辑**（那样只是自证），而是把 `index.html` 里的内联脚本抽出来，切掉末尾启动段、把内部函数挂到 `window.__T`，再用桩 DOM / localStorage 驱动 `applyGoals → applyLogs → applyNotes → refreshAll` 这条**真实渲染路径**，最后断言渲染出来的 DOM。断言通过的含义是「表里存的数据在页面上确实呈现为预期状态」。当前示例数据下 **20/20 通过**。
 
-`gen_seed.py` 生成的示例数据刻意覆盖了各种边界状态：3 个目标（`示例` 打标）、35 条记录，其中含**红卡**（逾期 + 昨天没学 + 近 7 天无记录 → 暂无推算）、**黄卡**（用掉本周休息日、连续天数保住）、2 条**补记**、2 条**未填分钟**（柱状图不硬凑）。
+`gen_seed.py` 生成的示例数据刻意覆盖了各种边界状态：3 个目标、35 条打卡记录、2 条周复盘，全部带 `示例` 标记；其中含**红卡**（逾期 + 昨天没学 + 近 7 天无记录 → 暂无推算）、**黄卡**（用掉本周休息日、连续天数保住）、2 条**补记**、2 条**未填分钟**（柱状图不硬凑）。日期全部相对「运行当天」计算，所以**不论星期几生成**，这几种状态都能复现。
 
-> **示例数据会「过期」，这是设计使然**：日期是相对生成当天算的，因此「昨日漏打卡 → 红卡/黄卡」「近 7 天速度 → 预计完成日」这些状态只在**生成当天**成立。隔几天再跑 `render_check.js` 会出现 FAIL —— 那不是代码坏了，而是演示数据不再"新"。重新跑一次 `gen_seed.py` 并写回数据表即可复原。
+> **示例数据会「过期」，这是设计使然**：日期是相对生成当天算的，因此「昨日漏打卡 → 红卡/黄卡」「近 7 天速度 → 预计完成日」这些状态只在**生成当天**成立。隔几天再跑 `render_check.js` 会出现 FAIL —— 那不是代码坏了，而是演示数据不再"新"。跑一次 `tools/reseed.py` 即可复原（重跑后回到 **20/20**）。
+
+`reseed.py` 只删除带示例标记的行，你自己新增的目标 / 打卡 / 复盘不会被碰：
+
+| 表 | 判定为示例的条件 |
+|---|---|
+| 学习目标 | `示例 = true`，或 `目标ID` 以 `seed-` 开头 |
+| 每日打卡记录 | `记录ID` 以 `lg-` 开头，或 `目标ID` 以 `seed-` 开头 |
+| 每周复盘 | `示例 = true` |
+
+因此**「每周复盘」表需要 `示例` 这一列**（checkbox，页面自己不写它，只用于区分示例数据）；`docs/data-schema.md` 的字段定义已包含。旧表可以用资料库 skill 的 `add_database_field.py` 补一列，再把历史示例行更新为 `true`。
 
 ## 来源与致谢
 
