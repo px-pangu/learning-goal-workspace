@@ -59,19 +59,30 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def run(skill_dir, script, body):
+    """调资料库 skill 的脚本。
+
+    skill 脚本的 stdout 里除了 JSON 还可能混入给用户的提示行（例如
+    `KS_USER_REPLY\t数据表「…」已创建…`），所以这里逐行找第一个能解析的 JSON 对象，
+    而不是 json.loads 整段输出。
+    """
     path = os.path.join(skill_dir, "database", script)
     out = subprocess.run([sys.executable, path, "--stdin"],
                          input=json.dumps(body, ensure_ascii=False),
                          capture_output=True, timeout=180,
                          encoding="utf-8", errors="replace")
-    text = (out.stdout or "").strip()
-    try:
-        res = json.loads(text)
-    except json.JSONDecodeError:
-        raise SystemExit("%s 输出无法解析：%s\n%s" % (script, text, out.stderr))
-    if isinstance(res, dict) and res.get("error"):
-        raise SystemExit("%s 返回错误：%s" % (script, res["error"]))
-    return res
+    for line in (out.stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            res = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(res, dict):
+            if res.get("error"):
+                raise SystemExit("%s 返回错误：%s" % (script, res["error"]))
+            return res
+    raise SystemExit("%s 输出里没找到 JSON：\n%s\n%s" % (script, out.stdout, out.stderr))
 
 
 def main():
@@ -80,13 +91,17 @@ def main():
     ap.add_argument("--space-id", default="", help="目标空间 id（留空=个人空间）")
     ap.add_argument("--parent-id", default="", help="挂到哪个节点下（留空=空间根目录）")
     ap.add_argument("--prefix", default="", help="表名前缀，例如「[测试] 」")
+    ap.add_argument("--only", default="", help="只建指定表，逗号分隔，例如 logs,notes")
     ap.add_argument("--configure", action="store_true", help="建好后把 ID 写进 index.html")
     ap.add_argument("--html", default=os.path.join(ROOT, "index.html"))
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     created = {}
+    wanted = {x.strip() for x in args.only.split(",") if x.strip()}
     for key, title, props in SCHEMAS:
+        if wanted and key not in wanted:
+            continue
         schema = {"title": args.prefix + title, "properties": props}
         if args.space_id:
             schema["space_id"] = args.space_id
@@ -109,17 +124,17 @@ def main():
         print("\n--dry-run：未创建任何表。确认表名与字段后去掉 --dry-run 再跑。")
         return
 
-    print("\n下一步（二选一）：")
-    print("  A. 写进页面：python3 tools/configure.py --goals %s --logs %s --notes %s" % (
-        created["goals"], created["logs"], created["notes"]))
-    print("  B. 在页面里填：我的 → 数据表绑定（只存在本机，不改仓库文件）")
-
-    if args.configure:
-        subprocess.run([sys.executable, os.path.join(ROOT, "tools", "configure.py"),
-                        "--html", args.html,
-                        "--goals", created["goals"], "--logs", created["logs"],
-                        "--notes", created["notes"]], check=True)
-        print("\n已写入 %s，页面现在读写你自己的三张表。" % args.html)
+    if all(k in created for k in ("goals", "logs", "notes")):
+        print("\n下一步（二选一）：")
+        print("  A. 写进页面：python3 tools/configure.py --goals %s --logs %s --notes %s" % (
+            created["goals"], created["logs"], created["notes"]))
+        print("  B. 在页面里填：我的 → 数据表绑定（只存在本机，不改仓库文件）")
+        if args.configure:
+            subprocess.run([sys.executable, os.path.join(ROOT, "tools", "configure.py"),
+                            "--html", args.html,
+                            "--goals", created["goals"], "--logs", created["logs"],
+                            "--notes", created["notes"]], check=True)
+            print("\n已写入 %s，页面现在读写你自己的三张表。" % args.html)
 
 
 if __name__ == "__main__":
