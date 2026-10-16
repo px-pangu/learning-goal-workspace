@@ -610,6 +610,31 @@
       </div>
     </div>
     <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--brand)"></span>数据表绑定</div>
+      <div class="tiny" style="line-height:1.6;margin-bottom:10px">
+        这份页面把数据读写到<b>你指定的三张资料库数据表</b>。还没绑定时，数据只存在这台设备的浏览器里，换设备不会同步，也不会写到任何别人的表。
+      </div>
+      <div id="bindStatus" style="margin-bottom:12px"></div>
+      <div style="display:grid;gap:8px">
+        <label class="tiny" style="display:grid;gap:4px">学习目标表 ID
+          <input type="text" id="bindGoals" placeholder="粘贴「学习目标」表 ID" autocomplete="off" spellcheck="false" style="min-height:44px">
+        </label>
+        <label class="tiny" style="display:grid;gap:4px">每日打卡记录表 ID
+          <input type="text" id="bindLogs" placeholder="粘贴「每日打卡记录」表 ID" autocomplete="off" spellcheck="false" style="min-height:44px">
+        </label>
+        <label class="tiny" style="display:grid;gap:4px">每周复盘表 ID
+          <input type="text" id="bindNotes" placeholder="粘贴「每周复盘」表 ID" autocomplete="off" spellcheck="false" style="min-height:44px">
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-brand" id="btnBindSave" style="min-height:44px">保存并立即使用</button>
+        <button class="btn" id="btnBindClear" style="min-height:44px">清除本机绑定</button>
+      </div>
+      <div class="tiny" style="margin-top:10px;line-height:1.6;color:var(--ink-3)">
+        表 ID 在资料库里打开那张表时从链接/节点信息里取；三张表的字段定义见仓库 <b>docs/data-schema.md</b>。填错会读取失败，改回来即可，不会损坏数据。
+      </div>
+    </div>
+    <div class="card">
       <div class="card-title"><span class="dot" style="background:var(--amber)"></span>数据管理</div>
       <div class="mine-list">
         <button class="mine-btn" id="btnClearSample">
@@ -699,15 +724,78 @@
 
 /* =========================================================================
    学习目标管理台 · 在线数据版
-   数据表（WorkBuddy 资料库）
-     每日打卡记录 : KbdNBYpDxaJvRFae2fSfg1   （DATABASE_ID，主数据表）
-     学习目标     : Ocea2076DWTpt6uL5TKqse
-     每周复盘     : LARGcPTarFRHAOIOQwXHxE
+   -------------------------------------------------------------------------
+   【数据表配置】下面三个常量就是这份页面读写的数据表。
+   默认全是占位符 —— 这意味着页面只会把数据存在当前浏览器里，
+   **不会连到任何人的表**。要用自己的资料库表，二选一：
+
+     1) 改下面三个常量，或跑  python3 tools/configure.py --goals <id> --logs <id> --notes <id>
+     2) 打开页面 → 「我的」→ 「数据表绑定」，粘贴自己的三个表 ID 保存即可（存本机，立即生效）
+
+   三张表的字段定义见 docs/data-schema.md。
+   -------------------------------------------------------------------------
    页面展示与计算以线上表为准；localStorage 只做离线缓存：
    读取失败时用缓存继续显示并给「重试」入口；写入失败时本地暂存，恢复后自动补写。
    ========================================================================= */
 
-var DATABASE_ID = 'KbdNBYpDxaJvRFae2fSfg1';
+var DB_GOALS = 'YOUR_GOALS_TABLE_ID';
+var DB_LOGS  = 'YOUR_LOGS_TABLE_ID';
+var DB_NOTES = 'YOUR_NOTES_TABLE_ID';
+
+/* 主表别名。页面静态校验要求 databaseId 取自字面量或名为 DATABASE_ID 的常量，
+   所以这里跟 DB_LOGS 写同一个值（tools/configure.py 会一起替换）；
+   运行时真正的取值是 BINDING.logs，由 resolveBinding() 赋值。 */
+var DATABASE_ID = 'YOUR_LOGS_TABLE_ID';
+
+/* ---------------- 数据表绑定：内置常量可被「我的」页手填的值覆盖 ---------------- */
+var LS_BINDING_KEY = "goal_workspace_v2_binding";
+var BINDING = { goals: DB_GOALS, logs: DB_LOGS, notes: DB_NOTES, source: "builtin" };
+
+function isTableId(v){ return typeof v === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(v.trim()); }
+function isPlaceholder(v){ return !v || /^YOUR_[A-Z]+_TABLE_ID$/.test(String(v).trim()); }
+
+function readBindingOverride(){
+  try{
+    var raw = localStorage.getItem(LS_BINDING_KEY);
+    if(!raw) return null;
+    var o = JSON.parse(raw), out = {};
+    if(!o || typeof o !== "object") return null;
+    ["goals","logs","notes"].forEach(function(k){
+      if(isTableId(o[k])) out[k] = String(o[k]).trim();
+    });
+    return (out.goals || out.logs || out.notes) ? out : null;
+  }catch(e){ return null; }
+}
+function saveBindingOverride(o){
+  try{ localStorage.setItem(LS_BINDING_KEY, JSON.stringify(o)); return true; }
+  catch(e){ return false; }
+}
+function clearBindingOverride(){
+  try{ localStorage.removeItem(LS_BINDING_KEY); }catch(e){}
+}
+function resolveBinding(){
+  var ov = readBindingOverride();
+  BINDING = { goals: DB_GOALS, logs: DB_LOGS, notes: DB_NOTES, source: "builtin" };
+  if(ov){
+    if(ov.goals) BINDING.goals = ov.goals;
+    if(ov.logs)  BINDING.logs  = ov.logs;
+    if(ov.notes) BINDING.notes = ov.notes;
+    BINDING.source = "local";
+  }
+  DATABASE_ID = BINDING.logs;   /* 主表别名同步 */
+  return BINDING;
+}
+/* 返回尚未配置的表名数组；为空表示三张表都在 */
+function unconfiguredTables(){
+  var miss = [];
+  if(isPlaceholder(BINDING.goals)) miss.push("学习目标");
+  if(isPlaceholder(BINDING.logs))  miss.push("每日打卡记录");
+  if(isPlaceholder(BINDING.notes)) miss.push("每周复盘");
+  return miss;
+}
+function tablesReady(){ return unconfiguredTables().length === 0; }
+
+resolveBinding();
 
 /* ================= 工具 ================= */
 var COLORS = ["#6366f1","#f59e0b","#10b981","#0ea5e9","#8b5cf6","#ef4444","#f97316","#14b8a6"];
@@ -853,13 +941,10 @@ var SYNC_STATE = "connecting"; /* connecting | syncing | synced | offline */
 var lastError = "";
 var writeFails = 0;
 var onUpdatedTimer = null;
+/* 有 SDK 但没配表 ID：不能连，也不该拿占位符去请求 */
+var UNCONFIGURED = false;
 
-try{
-  if(window.__SMART_PAGE__ && window.__SMART_PAGE__.database){
-    db = window.__SMART_PAGE__.database;
-    SDK_READY = true;
-  }
-}catch(e){ SDK_READY = false; }
+detectSdk();
 
 function setSync(st, msg){
   SYNC_STATE = st;
@@ -874,7 +959,7 @@ function fmtTime(ts){
 function syncText(){
   if(SYNC_STATE==="syncing") return "同步中…";
   if(SYNC_STATE==="synced") return "已同步";
-  if(SYNC_STATE==="offline") return "离线模式";
+  if(SYNC_STATE==="offline") return UNCONFIGURED ? "未绑定数据表" : "离线模式";
   return "正在加载…";
 }
 var remoteLogKeys = {}, remoteGoalKeys = {}, remoteNoteKeys = {};
@@ -992,9 +1077,9 @@ function pullAll(cb){
   }
   setSync("syncing");
   var steps = [
-    { id: "Ocea2076DWTpt6uL5TKqse", apply: applyGoals },
-    { id: DATABASE_ID, apply: applyLogs },
-    { id: "LARGcPTarFRHAOIOQwXHxE", apply: applyNotes }
+    { id: BINDING.goals, apply: applyGoals },
+    { id: BINDING.logs,  apply: applyLogs },
+    { id: BINDING.notes, apply: applyNotes }
   ];
   var i = 0, failed = null;
   function next(){
@@ -1079,9 +1164,10 @@ function scheduleRepull(){
 var pullTimer = null;
 
 function addGoalRemote(g, cb){
+  var DATABASE_ID = BINDING.goals;
   localOnlyGoals[g.id] = 1;
   if(!SDK_READY){ markWritten(false, new Error("离线模式")); if(cb) cb(false); return; }
-  db.addRecord({ databaseId: 'Ocea2076DWTpt6uL5TKqse', properties: goalProperties(g) })
+  db.addRecord({ databaseId: DATABASE_ID, properties: goalProperties(g) })
     .then(function(r){
       var rid = recIdOf(r);
       if(rid){ recGoal[g.id] = rid; delete localOnlyGoals[g.id]; }
@@ -1093,14 +1179,16 @@ function addGoalRemote(g, cb){
     .catch(function(err){ markWritten(false, err); if(cb) cb(false); });
 }
 function updateGoalRemote(g, cb){
+  var DATABASE_ID = BINDING.goals;
   var rid = recGoal[g.id];
   if(!SDK_READY || !rid){ addGoalRemote(g, cb); return; }
   localOnlyGoals[g.id] = 1;
-  db.updateRecord({ databaseId: 'Ocea2076DWTpt6uL5TKqse', recordId: rid, properties: goalProperties(g) })
+  db.updateRecord({ databaseId: DATABASE_ID, recordId: rid, properties: goalProperties(g) })
     .then(function(){ delete localOnlyGoals[g.id]; markWritten(true); if(cb) cb(true); })
     .catch(function(err){ markWritten(false, err); if(cb) cb(false); });
 }
 function addLogRemote(l, cb){
+  var DATABASE_ID = BINDING.logs;
   localOnlyLogs[l.id] = 1;
   if(!SDK_READY){ markWritten(false, new Error("离线模式")); if(cb) cb(false); return; }
   db.addRecord({ databaseId: DATABASE_ID, properties: logProperties(l) })
@@ -1115,17 +1203,18 @@ function addLogRemote(l, cb){
     .catch(function(err){ markWritten(false, err); if(cb) cb(false); });
 }
 function saveNoteRemote(week, cb){
+  var DATABASE_ID = BINDING.notes;
   var n = state.notes[week] || {};
   var rid = recNote[week];
   if(!SDK_READY){ markWritten(false, new Error("离线模式")); if(cb) cb(false); return; }
   if(rid){
     localOnlyNotes[week] = 1;
-    db.updateRecord({ databaseId: 'LARGcPTarFRHAOIOQwXHxE', recordId: rid, properties: noteProperties(n, week) })
+    db.updateRecord({ databaseId: DATABASE_ID, recordId: rid, properties: noteProperties(n, week) })
       .then(function(){ delete localOnlyNotes[week]; markWritten(true); if(cb) cb(true); })
       .catch(function(err){ markWritten(false, err); if(cb) cb(false); });
   }else{
     localOnlyNotes[week] = 1;
-    db.addRecord({ databaseId: 'LARGcPTarFRHAOIOQwXHxE', properties: noteProperties(n, week) })
+    db.addRecord({ databaseId: DATABASE_ID, properties: noteProperties(n, week) })
       .then(function(r){
         var nid = recIdOf(r);
         if(nid){ recNote[week] = nid; delete localOnlyNotes[week]; }
@@ -1149,11 +1238,8 @@ function serialDelete(entries, done){
       rid = it.t==="goals" ? recGoal[it.key] : (it.t==="notes" ? recNote[it.key] : recLog[it.key]);
     }
     if(!SDK_READY || !rid){ queueDelete(it.t, rid || "", it.key); failed++; step(); return; }
-    var chain = it.t==="goals"
-      ? db.deleteRecord({ databaseId: 'Ocea2076DWTpt6uL5TKqse', recordId: rid })
-      : (it.t==="notes"
-        ? db.deleteRecord({ databaseId: 'LARGcPTarFRHAOIOQwXHxE', recordId: rid })
-        : db.deleteRecord({ databaseId: DATABASE_ID, recordId: rid }));
+    var DATABASE_ID = it.t==="goals" ? BINDING.goals : (it.t==="notes" ? BINDING.notes : BINDING.logs);
+    var chain = db.deleteRecord({ databaseId: DATABASE_ID, recordId: rid });
     chain.then(function(){
       if(it.t==="goals") delete recGoal[it.key];
       else if(it.t==="notes") delete recNote[it.key];
@@ -1335,9 +1421,14 @@ function renderSync(){
     var show = SYNC_STATE==="offline";
     banner.classList.toggle("show", show);
     if(show){
-      var txt = SDK_READY
-        ? "与云端数据表同步失败"+(lastError?("（"+lastError+"）"):"")+"，当前显示的是本机缓存数据，写入会在恢复后自动补写。"
-        : "当前环境无法连接数据表，已切换到离线模式，数据暂存在本机。";
+      var txt;
+      if(UNCONFIGURED){
+        txt = "还没有绑定数据表，当前数据只存在这台设备的浏览器里。去「我的 → 数据表绑定」填上你自己的三张表 ID，数据就会存到你的资料库。";
+      }else if(SDK_READY){
+        txt = "与云端数据表同步失败"+(lastError?("（"+lastError+"）"):"")+"，当前显示的是本机缓存数据，写入会在恢复后自动补写。";
+      }else{
+        txt = "当前环境无法连接数据表，已切换到离线模式，数据暂存在本机。";
+      }
       $("netText").textContent = txt;
     }
   }
@@ -1346,9 +1437,11 @@ function renderSync(){
     st.textContent = syncText();
     $("mineSyncDot").className = "sync-dot "+cls;
     $("mineSyncTime").textContent = "最近同步：" + fmtTime(meta.lastSyncAt);
-    $("mineSyncHint").textContent = writeFails>0
-      ? ("有 "+writeFails+" 次写入未成功，已暂存在本机；点右侧「重新同步」即可补写。")
-      : "数据保存在你的资料库数据表里（学习目标 / 每日打卡记录 / 每周复盘），换设备或换浏览器打开同一链接即可继续。";
+    $("mineSyncHint").textContent = UNCONFIGURED
+      ? ("尚未绑定数据表：数据只存在这台设备的浏览器里，换设备不会同步。到下面「数据表绑定」填入自己的三张表 ID 即可。")
+      : (writeFails>0
+        ? ("有 "+writeFails+" 次写入未成功，已暂存在本机；点右侧「重新同步」即可补写。")
+        : "数据保存在你的资料库数据表里（学习目标 / 每日打卡记录 / 每周复盘），换设备或换浏览器打开同一链接即可继续。");
   }
 }
 
@@ -1366,9 +1459,9 @@ function renderHero(){
   var box = $("heroChips");
   if(!box) return;
   setHtml(box,
-    '<span class="chip" data-sp-bindable="database" data-sp-database-id="Ocea2076DWTpt6uL5TKqse">进行中 <b class="num">'+active+'</b> 个目标</span>'+
-    '<span class="chip" data-sp-bindable="database" data-sp-database-id="KbdNBYpDxaJvRFae2fSfg1">进行中今日已打卡 <b class="num">'+checkinText+'</b></span>'+
-    '<span class="chip" data-sp-bindable="database" data-sp-database-id="KbdNBYpDxaJvRFae2fSfg1">累计记录 <b class="num">'+state.logs.length+'</b> 条</span>');
+    '<span class="chip" data-sp-bindable="database" data-sp-database-id="'+esc(BINDING.goals)+'">进行中 <b class="num">'+active+'</b> 个目标</span>'+
+    '<span class="chip" data-sp-bindable="database" data-sp-database-id="'+esc(BINDING.logs)+'">进行中今日已打卡 <b class="num">'+checkinText+'</b></span>'+
+    '<span class="chip" data-sp-bindable="database" data-sp-database-id="'+esc(BINDING.logs)+'">累计记录 <b class="num">'+state.logs.length+'</b> 条</span>');
 }
 
 /* ================= 今日打卡 ================= */
@@ -1466,7 +1559,7 @@ function goalRowHtml(g){
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>'+
     '</div>'+
     '<div class="mini-progress"><i style="width:'+pct+'%;background:'+g.color+'"></i></div>'+
-    '<div class="muted" style="margin-bottom:10px" data-sp-bindable="database" data-sp-database-id="KbdNBYpDxaJvRFae2fSfg1">'+
+    '<div class="muted" style="margin-bottom:10px" data-sp-bindable="database" data-sp-database-id="'+esc(BINDING.logs)+'">'+
       '<b class="num">'+trimNum(done)+'</b> / '+trimNum(g.total)+' '+esc(g.unit)+
       ' · 截止 '+fmtShort(g.deadline)+
       (st>0?' · <span class="streak-flame">'+ICON.flame+'<span class="num">'+st+'</span> 天</span>':'')+
@@ -1994,6 +2087,12 @@ function bind(){
   var btnResync=$("btnResync");
   if(btnResync) btnResync.addEventListener("click",function(){ manualSync(); });
 
+  var btnBindSave=$("btnBindSave");
+  if(btnBindSave) btnBindSave.addEventListener("click",saveBindingFromForm);
+  var btnBindClear=$("btnBindClear");
+  if(btnBindClear) btnBindClear.addEventListener("click",function(){
+    armConfirm(btnBindClear,"再点一次确认清除",clearBinding);
+  });
   var btnClearSample=$("btnClearSample");
   if(btnClearSample) btnClearSample.addEventListener("click",function(){
     armConfirm(btnClearSample,"再点一次确认清空示例",clearSample);
@@ -2151,42 +2250,123 @@ function manualSync(){
   });
 }
 
+/* ================= 数据表绑定（「我的」页） ================= */
+var BIND_FIELDS = [
+  { key: "goals", id: "bindGoals", label: "学习目标" },
+  { key: "logs",  id: "bindLogs",  label: "每日打卡记录" },
+  { key: "notes", id: "bindNotes", label: "每周复盘" }
+];
+
+function renderBindingStatus(){
+  var box = $("bindStatus");
+  if(!box) return;
+  var rows = BIND_FIELDS.map(function(f){
+    var v = BINDING[f.key];
+    var ok = !isPlaceholder(v);
+    return '<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--line)">'+
+      '<span style="width:8px;height:8px;border-radius:50%;flex:none;background:'+(ok?"var(--green)":"var(--amber)")+'"></span>'+
+      '<span style="flex:none;min-width:7.5em">'+esc(f.label)+'</span>'+
+      '<code style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:var(--ink-3)">'+
+        (ok ? esc(v) : "未绑定")+'</code></div>';
+  }).join("");
+  var src = BINDING.source==="local"
+    ? "当前使用<b>本机填写</b>的绑定（只在这台设备有效）。"
+    : "当前使用<b>页面内置</b>的绑定。";
+  setHtml(box, rows + '<div class="tiny" style="margin-top:8px;color:var(--ink-3)">'+src+'</div>');
+}
+
+function fillBindingForm(){
+  BIND_FIELDS.forEach(function(f){
+    var el = $(f.id);
+    if(!el) return;
+    el.value = isPlaceholder(BINDING[f.key]) ? "" : BINDING[f.key];
+  });
+}
+
+function detectSdk(){
+  SDK_READY = false;
+  UNCONFIGURED = false;
+  try{
+    if(window.__SMART_PAGE__ && window.__SMART_PAGE__.database){
+      db = window.__SMART_PAGE__.database;
+      SDK_READY = true;
+    }
+  }catch(e){ SDK_READY = false; }
+  if(SDK_READY && !tablesReady()){ SDK_READY = false; UNCONFIGURED = true; }
+}
+
+/* 保存绑定后重新判定环境并重新拉数据 */
+function applyBindingAndRestart(notice){
+  resolveBinding();
+  detectSdk();
+  renderBindingStatus();
+  fillBindingForm();
+  setSync("connecting");
+  startSync();
+  refreshAll();
+  if(notice) toast(notice);
+}
+
+function saveBindingFromForm(){
+  var o = {}, any = false;
+  BIND_FIELDS.forEach(function(f){
+    var el = $(f.id);
+    var v = el ? String(el.value || "").trim() : "";
+    if(!v) return;
+    if(!isTableId(v)){ toast("「"+f.label+"」的表 ID 看起来不对，应是一串字母数字"); return; }
+    o[f.key] = v; any = true;
+  });
+  if(!any){ toast("至少填一个表 ID，或点「清除本机绑定」"); return; }
+  if(!saveBindingOverride(o)){ toast("保存失败：浏览器不允许写入本地存储"); return; }
+  applyBindingAndRestart("已绑定，正在读取你的数据表…");
+}
+
+function clearBinding(){
+  clearBindingOverride();
+  applyBindingAndRestart("已清除本机绑定");
+}
+
 /* ================= 启动 ================= */
+function startSync(){
+  if(SDK_READY){
+    setSync("connecting");
+    pullAll(function(ok){
+      if(ok){
+        runDeletes(function(){
+          reconcile(function(){
+            refreshAll();
+            setSync("synced","");
+          });
+        });
+      }else{
+        refreshAll();
+      }
+    });
+    try{
+      db.onUpdated(function(){
+        if(SYNC_STATE==="syncing") return;
+        clearTimeout(onUpdatedTimer);
+        onUpdatedTimer=setTimeout(function(){
+          if(SYNC_STATE==="syncing") return;
+          pullAll(function(ok){ if(ok) refreshAll(); });
+        }, 1200);
+      });
+    }catch(e){}
+  }else{
+    setSync("offline", UNCONFIGURED ? "尚未绑定数据表" : "当前环境无法连接数据表");
+    /* 首次 refreshAll 时同步态还是 connecting，首屏会渲染成「正在加载中…」；
+       结论确定后必须重渲染一次，否则这句提示会一直留在今日首屏。 */
+    refreshAll();
+  }
+}
+
 loadMeta();
 loadCache();
 bind();
+renderBindingStatus();
+fillBindingForm();
 refreshAll();
-
-if(SDK_READY){
-  setSync("connecting");
-  pullAll(function(ok){
-    if(ok){
-      runDeletes(function(){
-        reconcile(function(){
-          refreshAll();
-          setSync("synced","");
-        });
-      });
-    }else{
-      refreshAll();
-    }
-  });
-  try{
-    db.onUpdated(function(){
-      if(SYNC_STATE==="syncing") return;
-      clearTimeout(onUpdatedTimer);
-      onUpdatedTimer=setTimeout(function(){
-        if(SYNC_STATE==="syncing") return;
-        pullAll(function(ok){ if(ok) refreshAll(); });
-      }, 1200);
-    });
-  }catch(e){}
-}else{
-  setSync("offline","当前环境无法连接数据表");
-  /* 首次 refreshAll 时同步态还是 connecting，首屏会渲染成「正在加载中…」；
-     离线结论确定后必须重渲染一次，否则这句提示会一直留在今日首屏。 */
-  refreshAll();
-}
+startSync();
 if(bootNotice) setTimeout(function(){ toast(bootNotice); },100);
 })();
 

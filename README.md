@@ -41,12 +41,36 @@
 
 ## 快速开始
 
-1. 在 WorkBuddy 资料库里按上表建好三张数据表
-2. 把 `index.html` 导入资料库个人空间，导入时绑定这三张表
-3. 打开页面即可
+页面**不绑定任何特定账号的数据表**：数据表 ID 由使用者自己配置，配谁的就读谁的。
 
-> **注意**：`index.html` 里写死了三个数据表 ID（`Ocea2076DWTpt6uL5TKqse` / `KbdNBYpDxaJvRFae2fSfg1` / `LARGcPTarFRHAOIOQwXHxE`），那是作者自己空间里的表，请全部替换成你的。
-> 直接用浏览器双击打开 `index.html` 会进入**离线模式**（只用 localStorage）：因为资料库运行时才会注入 `window.__SMART_PAGE__.database`。
+1. 在你自己的 WorkBuddy 资料库里按上表建好三张数据表
+2. 把三张表的 ID 配进页面（两种方式，任选其一，见下）
+3. 把 `index.html` 导入你的资料库空间，导入时绑定这三张表
+4. 打开页面即可
+
+### 方式一：一键配置（推荐）
+
+```bash
+python3 tools/configure.py --goals <学习目标表ID> --logs <打卡记录表ID> --notes <每周复盘表ID>
+```
+
+脚本会改 `index.html` 顶部的配置区。想先看看当前配没配：
+
+```bash
+python3 tools/configure.py --check
+```
+
+### 方式二：页面内填写（不用碰代码）
+
+打开页面 → 「我的」→ **数据表绑定**，把三个表 ID 粘进去保存，立即生效，存在本机浏览器里。
+
+### 还没配置时是什么行为
+
+- **不会**去请求任何表，更不会连到作者的表（`tools/binding_check.js` 有断言专门守这条）
+- 页面照常可用，数据存在当前浏览器（localStorage），换设备不同步
+- 首屏会明确提示「未绑定数据表」，不会假装在线
+
+> 直接用浏览器双击打开 `index.html` 同样是这个行为：资料库运行时才会注入 `window.__SMART_PAGE__.database`。
 
 ## 数据可靠性
 
@@ -59,12 +83,17 @@
 
 ```
 index.html              交付页面（单文件，含全部 CSS / JS）
+tools/configure.py      一键把三张表 ID 配进页面（--check 可查看当前配置）
 tools/gen_seed.py       生成示例数据载荷（按「今天」相对偏移，演示状态可复现）
 tools/fetch_rows.py     把数据表读回的内容转成页面行结构（带类型）
 tools/render_check.js   渲染回归校验（用页面自身的逻辑跑断言）
 tools/offline_check.js  离线可用性自检（模拟无 SDK 环境启动 + 点击）
+tools/binding_check.js  数据归属安全校验（证明只会读写配置给它的表）
 docs/data-schema.md     三张数据表的字段定义
 ```
+
+页面顶部有一个集中的**配置区**（`DB_GOALS` / `DB_LOGS` / `DB_NOTES`），三张表的 ID 只在这里出现一次；
+SDK 调用统一从 `BINDING` 取值，因此改一处（或页面内填一次）就全生效。
 
 ## 开发与自检
 
@@ -85,9 +114,18 @@ node tools/render_check.js
 
 # 5) 离线可用性自检（不需要任何数据表，clone 下来即可跑）
 node tools/offline_check.js
+
+# 6) 数据归属安全校验（同样不需要任何数据表）
+node tools/binding_check.js
 ```
 
 `offline_check.js` 回答的是「clone 下来、还没接任何数据表时，这页面能不能用」。它刻意把环境模拟成**没有 `window.__SMART_PAGE__` 的普通浏览器**，保留页面完整启动段跑真实启动流程，再用桩 DOM 模拟点击，验证离线模式下仍然：不白屏、能新建目标、能打卡、关掉重开数据还在、四个 Tab 能切。当前 **15/15 通过**。
+
+`binding_check.js` 回答的是「它会不会读写到不该读写的表」。它桩掉 `window.__SMART_PAGE__.database` 并记录每一次调用的 `databaseId`：未配置时断言**一次调用都没有**；在「我的 → 数据表绑定」里填了 ID 后，断言请求只打到填的那几个 ID、不出现任何 22 位的他人表 ID。当前 **12/12 通过**。
+
+### 已知取舍：静态校验 DSDK011
+
+资料库的静态校验规则要求 `data-sp-database-id` 属性写成**字面量**，而支持运行时配置必然要把它写成表达式（属性值与 SDK 调用同源，来自同一个 `BINDING`，一致性反而比手写更可靠）。因此本页会稳定报 4 条 DSDK011，属有意取舍，不是缺陷；`PQ001` / `PQ005` 两条同为误报（脚本已通过 `node --check`，且全页 HTML 写入点唯一、插入前均经 `esc()` 转义）。
 
 `render_check.js` 的做法值得说明：它**不重写一遍业务逻辑**（那样只是自证），而是把 `index.html` 里的内联脚本抽出来，切掉末尾启动段、把内部函数挂到 `window.__T`，再用桩 DOM / localStorage 驱动 `applyGoals → applyLogs → applyNotes → refreshAll` 这条**真实渲染路径**，最后断言渲染出来的 DOM。断言通过的含义是「表里存的数据在页面上确实呈现为预期状态」。当前示例数据下 **20/20 通过**。
 
